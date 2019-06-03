@@ -550,19 +550,15 @@ void printModemResult(byte code)
 }
 
 
-byte getCmdParam(char *cmd, int &ptr)
+long getCmdParam(char *cmd, int &ptr)
 {
-  byte res = 0;
+  long res = 0;
 
   ptr++;
-  if( isdigit(cmd[ptr]) )
+  while( isdigit(cmd[ptr]) )
     {
-      int p = ptr;
-      while( isdigit(cmd[ptr]) ) ptr++;
-      char c = cmd[ptr];
-      cmd[ptr] = 0;
-      res = atoi(cmd+p);
-      cmd[ptr] = c;
+      res = (res * 10) + (cmd[ptr] - '0');
+      ptr++;
     }
   
   return res;
@@ -1164,48 +1160,36 @@ void handleModemCommand()
                             }
                         }
                     }
-                  else
-                    status = E_ERROR;
-                  ptr = cmdLen;
-                }
-              else if( cmd[ptr]=='#' )
-                {
-                  ptr++;
-                  if( strncmpi(cmd+ptr, "BDR", 3)==0 )
+                  else if( strncmpi(cmd+ptr, "UART", 4)==0 )
                     {
-                      ptr += 3;
-                      if( cmd[ptr]=='?' )
+                      ptr += 4;
+                      int i = getCmdParam(cmd, ptr);
+                      if ( i!=0 )
                         {
-                          if( modemVerbose ) printModemCR();
-                          Serial.print(SerialData.baud / 2400);
-                          printModemCR();
-                        }
-                      else if( cmd[ptr]=='=' )
-                        {
-                          if( cmd[ptr+1]=='?' )
+                          SerialData.baud = i;
+                          if( cmd[ptr]==',' )
                             {
-                              if( modemVerbose ) printModemCR();
-                              Serial.print('0');
-                              for(int i=1; i<48; i++) { Serial.print(','); Serial.print(i); }
-                              printModemCR();
+                              i = getCmdParam(cmd, ptr);
+                              SerialData.bits = i;
                             }
-                          else
+                          if( cmd[ptr]==',' )
                             {
-                              byte v = getCmdParam(cmd, ptr);
-                              if( v <= 48 )
-                                {
-                                  if( v==0 )
-                                    EEPROM.get(768, SerialData);
-                                  else
-                                    SerialData.baud = v * 2400;
-
-                                  printModemResult(E_OK);
-                                  applySerialSettings();
-                                  status = -1;
-                                }
-                              else
-                                status = E_ERROR;
+                              i = getCmdParam(cmd, ptr);
+                              SerialData.stopbits = i;
                             }
+                          if( cmd[ptr]==',' )
+                            {
+                              i = getCmdParam(cmd, ptr);
+                              SerialData.parity = i;
+                            }
+                          if( cmd[ptr]==',' )
+                            {
+                              getCmdParam(cmd, ptr);
+                              // Ignore flow control
+                            }
+                          printModemResult(E_OK);
+                          applySerialSettings();
+                          status = -1;
                         }
                       else
                         status = E_ERROR;
