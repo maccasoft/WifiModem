@@ -1091,39 +1091,40 @@ void handleModemCommand()
                         {
                           char ssid[32], key[32];
                           getCmdParam(cmd, ssid, ptr);
-                          if( ssid[0]!=0 && cmd[ptr]==',' )
+                          if( cmd[ptr]==',' )
                             {
                               getCmdParam(cmd, key, ptr);
-                              if( key[0]!=0 )
+                            }
+                          if( ssid[0]!=0 && key[0]!=0 )
+                            {
+                              if( WiFi.status() == WL_CONNECTED )
                                 {
-                                  if( WiFi.status() == WL_CONNECTED )
-                                    {
-                                      WiFi.disconnect();
-                                      while(WiFi.status() == WL_CONNECTED )
-                                        delay(250);
-                                    }
-
-                                  strcpy(WifiData.ssid, ssid);
-                                  strcpy(WifiData.key, key);
-                                  
-                                  WiFi.begin(WifiData.ssid, WifiData.key);
-
-                                  // try to connect to WiFi
-                                  uint8_t i = 0;
-                                  while(WiFi.status() != WL_CONNECTED && i++ < 40 )
-                                  {
+                                  WiFi.disconnect();
+                                  while(WiFi.status() == WL_CONNECTED )
                                     delay(250);
-                                    if( Serial.available()>0 && Serial.read() == 27 ) break;
-                                  }
-
-                                  if( WiFi.status() != WL_CONNECTED )
-                                    {
-                                      if( i == 41 )
-                                        status = E_ERROR;
-                                    }
                                 }
-                              else
-                                status = E_ERROR;
+
+                              memset(WifiData.ssid, 0, sizeof(WifiData.ssid));
+                              strcpy(WifiData.ssid, ssid);
+
+                              memset(WifiData.key, 0, sizeof(WifiData.key));
+                              strcpy(WifiData.key, key);
+                                  
+                              WiFi.begin(WifiData.ssid, WifiData.key);
+
+                              // try to connect to WiFi
+                              uint8_t i = 0;
+                              while(WiFi.status() != WL_CONNECTED && i++ < 40 )
+                              {
+                                delay(250);
+                                if( Serial.available()>0 && Serial.read() == 27 ) break;
+                              }
+
+                              if( WiFi.status() != WL_CONNECTED )
+                                {
+                                  if( i == 41 )
+                                    status = E_ERROR;
+                                }
                             }
                           else
                             status = E_ERROR;
