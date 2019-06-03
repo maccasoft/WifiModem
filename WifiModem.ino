@@ -412,9 +412,8 @@ void setup()
       SerialData.stopbits = 1;
       SerialData.silent   = false;
       SerialData.handleTelnetProtocol = 1;
-      SerialData.magic    = MAGICVAL;
       strcpy(SerialData.telnetTerminalType, "vt100");
-      EEPROM.put(768, SerialData);
+      SerialData.magic    = MAGICVAL;
     }
   else
     {
@@ -424,8 +423,8 @@ void setup()
       SerialData.telnetTerminalType[i]=0;
     }
   
-  // start serial interface with setup parameters (9600 baud 8N1)
-  Serial.begin(9600);
+  // start serial interface
+  Serial.begin(SerialData.baud);
 
   // read WiFi info
   WiFi.mode(WIFI_STA);
@@ -1080,6 +1079,42 @@ void handleModemCommand()
                 {
                   // ignore speaker settings, answer requests, pulse/tone dial settings
                   getCmdParam(cmd, ptr);
+                }
+              else if( cmd[ptr]=='&' )
+                {
+                  ptr++;
+                  if( toupper(cmd[ptr])=='W' )
+                    {
+                      getCmdParam(cmd, ptr);
+                      EEPROM.put(0, WifiData);
+                      EEPROM.commit();
+                      EEPROM.put(768, SerialData);
+                      EEPROM.commit();
+                    }
+                  else if( toupper(cmd[ptr])=='F')
+                    {
+                      SerialData.baud     = 9600;
+                      SerialData.bits     = 8;
+                      SerialData.parity   = 0;
+                      SerialData.stopbits = 1;
+                      SerialData.silent   = false;
+                      SerialData.handleTelnetProtocol = 1;
+                      strcpy(SerialData.telnetTerminalType, "vt100");
+                      
+                      applySerialSettings();
+    
+                      // reset parameters (ignore command parameter)
+                      getCmdParam(cmd, ptr);
+                      resetModemState();
+    
+                      // can not be followed by other commands
+                      ptr = cmdLen;
+                    }
+                  else
+                    {
+                    status = E_ERROR;
+                    ptr = cmdLen;
+                    }
                 }
               else if( cmd[ptr]=='+' )
                 {
