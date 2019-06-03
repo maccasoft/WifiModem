@@ -398,70 +398,8 @@ void clearSerialBuffer()
 }
 
 
-void GetWiFiData(const char *msg)
-{
-  clearSerialBuffer();
-
-  bool go = true;
-  while( go )
-  {
-     Serial.println(msg); 
-     Serial.println("Press C to configure WiFi connection information.\n");
-     
-     unsigned long t = millis()+2000;
-     while( millis()<t ) if( Serial.available()>0 && Serial.read()=='C' ) { go = false; break; }
-     yield();
-  }
-
-  Serial.println("Scanning for networks...");
-
-  WiFi.disconnect();
-  int n = WiFi.scanNetworks();
-  if (n == 0) {
-    Serial.println("No networks found.");
-  } else {
-    Serial.print(n);
-    Serial.println(" networks found:");
-    for (int i = 0; i < n; ++i) {
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.print(WiFi.SSID(i));
-      Serial.print(" (");
-      Serial.print(WiFi.RSSI(i));
-      Serial.print(")");
-      Serial.println((WiFi.encryptionType(i) == ENC_TYPE_NONE) ? " " : "*");
-      delay(10);
-    }
-  }
-  Serial.println("\n");
-  WiFi.disconnect();
-
-  clearSerialBuffer();
-  Serial.print("SSID: ");
-  readString(WifiData.ssid, 256, false);
-  Serial.println();
-
-  clearSerialBuffer();
-  Serial.print("Password: ");
-  readString(WifiData.key, 256, true);
-  Serial.println();
-
-  WifiData.magic = MAGICVAL;
-  SerialData.silent = false;
-  EEPROM.put(0, WifiData);
-  EEPROM.put(768, SerialData);
-  EEPROM.commit();
-}
-
-
 void setup() 
 {
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-
-  // start serial interface with setup parameters (9600 baud 8N1)
-  Serial.begin(9600);
-
   // read serial info
   EEPROM.begin(1024);
   EEPROM.get(768, SerialData);
@@ -477,7 +415,6 @@ void setup()
       SerialData.magic    = MAGICVAL;
       strcpy(SerialData.telnetTerminalType, "vt100");
       EEPROM.put(768, SerialData);
-      EEPROM.commit();
     }
   else
     {
@@ -487,79 +424,18 @@ void setup()
       SerialData.telnetTerminalType[i]=0;
     }
   
+  // start serial interface with setup parameters (9600 baud 8N1)
+  Serial.begin(9600);
+
   // read WiFi info
   WiFi.mode(WIFI_STA);
   EEPROM.get(0, WifiData);
-  if( WifiData.magic != MAGICVAL ) 
-    GetWiFiData("WiFi connection information not configured.");
-
-  // start WiFi interface
-  while( WiFi.status() != WL_CONNECTED )
-  {
-    WiFi.begin(WifiData.ssid, WifiData.key);
-    uint8_t i = 0;
-
-    // try to connect to WiFi
-    while(WiFi.status() != WL_CONNECTED && i++ < 20 ) 
+  if( WifiData.magic == MAGICVAL ) 
     {
-      delay(250);
-      digitalWrite(LED_PIN, HIGH); 
-      delay(250);
-      digitalWrite(LED_PIN, LOW); 
-      if( Serial.available()>0 && Serial.read() == 27 ) break;
+      // start WiFi interface
+      if( WifiData.ssid[0] != '\0' )
+        WiFi.begin(WifiData.ssid, WifiData.key);
     }
-
-    if( WiFi.status() != WL_CONNECTED )
-    {
-      char buffer[300];
-      if( i == 21 )
-        sprintf(buffer, "Could not connect to %s.", WifiData.ssid);
-      else
-        sprintf(buffer, "Received ESC during connect.");
-        
-      GetWiFiData(buffer);
-    }
-  }
-
-  // if we get here then we're connected to WiFi
-  digitalWrite(LED_PIN, HIGH); 
-
-  // if normal operation is different from 9600 8N1 then print info now
-  // (and again after switching)
-  if( !SerialData.silent && (SerialData.baud!=9600 || GetSerialConfig()!=SERIAL_8N1) )
-    {
-      Serial.print("\nConnected to network "); Serial.println(WifiData.ssid);
-      Serial.print("Listening on port 23 (telnet) at IP "); Serial.println(WiFi.localIP());
-      Serial.flush();
-    }
-
-  // re-start serial interface with normal operation parameters
-  Serial.end();
-  Serial.begin(SerialData.baud, GetSerialConfig());
-
-  if( !SerialData.silent )
-  {
-    Serial.println();
-    Serial.print("\nConnected to network "); Serial.println(WifiData.ssid);
-    Serial.print("Listening on port 23 (telnet) at IP "); Serial.println(WiFi.localIP());
-    Serial.print("\nPress 's' to skip this information at future connects.");
-    
-    int n = 3;
-    unsigned long t = millis()+1000;
-    while( n>0 )
-    {
-      if( millis()>t ) { Serial.print('.'); n--; t = millis()+1000; }
-      if( Serial.available()>0 && tolower(Serial.read())=='s' ) 
-        {
-          SerialData.silent = true;
-          EEPROM.put(768, SerialData);
-          EEPROM.commit();
-          break; 
-        }
-    }
-
-    Serial.println('\n');
-  }
 
   MDNS.begin("esp8266");
   webserver.on("/", handleRoot);
@@ -690,6 +566,24 @@ byte getCmdParam(char *cmd, int &ptr)
     }
   
   return res;
+}
+
+
+void getCmdParam(char *cmd, char *res, int &ptr)
+{
+  ptr++;
+  if( cmd[ptr]=='"' )
+    {
+      ptr++;
+      while( cmd[ptr]!=0 && cmd[ptr]!='"' )
+        {
+          *res++ = cmd[ptr++];
+        }
+      if( cmd[ptr]=='"' )
+          ptr++;
+    }
+
+  *res = 0;
 }
 
 
@@ -886,6 +780,34 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
 }
 
 
+int strncmpi(const char *s1, const char *s2, size_t cchars)
+{
+  char c1, c2;
+
+  if ( s1==s2 )
+    return 0;
+
+  if ( s1==0 )
+    return -1;
+
+  if ( s2==0 )
+    return 1;
+
+  if ( cchars==0 )
+    return 0;
+
+  do {
+    c1 = toupper(*s1);
+    c2 = toupper(*s2);
+    s1++;
+    s2++;
+    cchars--;
+  } while ( (c1 != 0) && (c1 == c2) && (cchars>0) );
+  
+  return (int)(c1 - c2);
+}
+
+
 void handleModemCommand()
 {
   // check if a modem AT command was received
@@ -897,13 +819,13 @@ void handleModemCommand()
     {
       c = (Serial.read() & 0x7f);
       if( cmdLen<80 && c>32 )
-        cmd[cmdLen++] = toupper(c);
+        cmd[cmdLen++] = c;
       else if( cmdLen>0 && c == modemReg[REG_BSP] )
         cmdLen--;
           
       if( modemEcho ) 
         {
-          if( c==8 )
+          if( c == modemReg[REG_BSP] )
             { Serial.print(char(8)); Serial.print(' '); Serial.print(char(8)); }
           else
             Serial.print(c);
@@ -912,7 +834,7 @@ void handleModemCommand()
       prevCharTime = millis();
     }
 
-  if( cmdLen==2 && cmd[0]=='A' && cmd[1]=='/' )
+  if( cmdLen==2 && toupper(cmd[0])=='A' && cmd[1]=='/' )
     {
       c = modemReg[REG_CR];
       cmd[1] = 'T';
@@ -922,7 +844,7 @@ void handleModemCommand()
   if( c == modemReg[REG_CR] )
     {
       prevCmdLen = cmdLen;
-      if( cmdLen>=2 && cmd[0]=='A' && cmd[1]=='T' )
+      if( cmdLen>=2 && toupper(cmd[0])=='A' && toupper(cmd[1])=='T' )
         {
           cmd[cmdLen]=0;
           int ptr = 2;
@@ -930,7 +852,7 @@ void handleModemCommand()
           int status = E_OK;
           while( status!=E_ERROR && ptr<cmdLen )
             {
-              if( cmd[ptr]=='D' )
+              if( toupper(cmd[ptr])=='D' )
                 {
                   unsigned long t = millis();
 
@@ -941,7 +863,7 @@ void handleModemCommand()
                       modemReg[REG_CURLINESPEED] = 0;
                     }
 
-                  ptr++; if( cmd[ptr]=='T' || cmd[ptr]=='P' ) ptr++;
+                  ptr++; if( toupper(cmd[ptr])=='T' || toupper(cmd[ptr])=='P' ) ptr++;
 
                   bool haveAlpha = false;
                   int numSep = 0;
@@ -1069,9 +991,9 @@ void handleModemCommand()
                   // ATD can not be followed by other commands
                   ptr = cmdLen;
                 }
-              else if( cmd[ptr]=='H' )
+              else if( toupper(cmd[ptr])=='H' )
                 {
-                  if( cmdLen-ptr==1 || cmd[ptr+1]=='0' )
+                  if( cmdLen-ptr==1 || toupper(cmd[ptr+1])=='0' )
                     {
                       // hang up
                       if( modemClient.connected() ) 
@@ -1083,7 +1005,7 @@ void handleModemCommand()
 
                   ptr += 2;
                 }
-              else if( cmd[ptr]=='O' )
+              else if( toupper(cmd[ptr])=='O' )
                 {
                   getCmdParam(cmd, ptr);
                   if( modemClient.connected() )
@@ -1093,15 +1015,15 @@ void handleModemCommand()
                       break;
                     }
                 }
-              else if( cmd[ptr]=='E' )
+              else if( toupper(cmd[ptr])=='E' )
                 modemEcho = getCmdParam(cmd, ptr)!=0;
-              else if( cmd[ptr]=='Q' )
+              else if( toupper(cmd[ptr])=='Q' )
                 modemQuiet = getCmdParam(cmd, ptr)!=0;
-              else if( cmd[ptr]=='V' )
+              else if( toupper(cmd[ptr])=='V' )
                 modemVerbose = getCmdParam(cmd, ptr)!=0;
-              else if( cmd[ptr]=='X' )
+              else if( toupper(cmd[ptr])=='X' )
                 modemExtCodes = getCmdParam(cmd, ptr);
-              else if( cmd[ptr]=='Z' )
+              else if( toupper(cmd[ptr])=='Z' )
                 {
                   // reset serial settings to saved value
                   EEPROM.get(768, SerialData);
@@ -1114,7 +1036,7 @@ void handleModemCommand()
                   // ATZ can not be followed by other commands
                   ptr = cmdLen;
                 }
-              else if( cmd[ptr]=='S' )
+              else if( toupper(cmd[ptr])=='S' )
                 {
                   static uint8_t currentReg = 0;
                   int p = ptr;
@@ -1139,19 +1061,117 @@ void handleModemCommand()
                         modemReg[reg] = v;
                     }
                 }
-              else if( cmd[ptr]=='I' )
+              else if( toupper(cmd[ptr])=='I' )
                 {
                   byte n = getCmdParam(cmd, ptr);
+                  if (n == 2)
+                    {
+                      printModemCR();
+                      Serial.print(WiFi.localIP());
+                    }
+                  else if (n == 3)
+                    {
+                      printModemCR();
+                      Serial.print(WifiData.ssid);
+                    }
+                  else if (n == 6)
+                    {
+                      printModemCR();
+                      Serial.print(WiFi.macAddress());
+                    }
                 }
-              else if( cmd[ptr]=='M' || cmd[ptr]=='L' || cmd[ptr]=='A' || cmd[ptr]=='P' || cmd[ptr]=='T' )
+              else if( toupper(cmd[ptr])=='M' || toupper(cmd[ptr])=='L' || toupper(cmd[ptr])=='A' || toupper(cmd[ptr])=='P' || toupper(cmd[ptr])=='T' )
                 {
                   // ignore speaker settings, answer requests, pulse/tone dial settings
                   getCmdParam(cmd, ptr);
                 }
+              else if( cmd[ptr]=='+' )
+                {
+                  ptr++;
+                  if( strncmpi(cmd+ptr, "CWJAP", 5)==0 )
+                    {
+                      ptr += 5;
+                      if( cmd[ptr]=='=')
+                        {
+                          char ssid[32], key[32];
+                          getCmdParam(cmd, ssid, ptr);
+                          if( ssid[0]!=0 && cmd[ptr]==',' )
+                            {
+                              getCmdParam(cmd, key, ptr);
+                              if( key[0]!=0 )
+                                {
+                                  if( WiFi.status() == WL_CONNECTED )
+                                    {
+                                      WiFi.disconnect();
+                                      while(WiFi.status() == WL_CONNECTED )
+                                        delay(250);
+                                    }
+
+                                  strcpy(WifiData.ssid, ssid);
+                                  strcpy(WifiData.key, key);
+                                  
+                                  WiFi.begin(WifiData.ssid, WifiData.key);
+
+                                  // try to connect to WiFi
+                                  uint8_t i = 0;
+                                  while(WiFi.status() != WL_CONNECTED && i++ < 40 )
+                                  {
+                                    delay(250);
+                                    if( Serial.available()>0 && Serial.read() == 27 ) break;
+                                  }
+
+                                  if( WiFi.status() != WL_CONNECTED )
+                                    {
+                                      if( i == 41 )
+                                        status = E_ERROR;
+                                    }
+                                }
+                              else
+                                status = E_ERROR;
+                            }
+                          else
+                            status = E_ERROR;
+                        }
+                      else
+                        status = E_ERROR;
+                    }
+                  else if( strncmpi(cmd+ptr, "CWQAP", 5)==0 )
+                    {
+                      WiFi.disconnect();
+                      memset(WifiData.ssid, 0, sizeof(WifiData.ssid));
+                      memset(WifiData.key, 0, sizeof(WifiData.key));
+                      while(WiFi.status() == WL_CONNECTED )
+                        delay(250);
+                    }
+                  else if( strncmpi(cmd+ptr, "CWLAP", 5)==0 )
+                    {
+                      int n = WiFi.scanNetworks();
+                      if ( n!=0 )
+                        {
+                          for (int i = 0; i < n; ++i)
+                            {
+                              printModemCR();
+                              Serial.print("+CWLAP:");
+                              Serial.print(WiFi.encryptionType(i));
+                              Serial.print(",");
+                              Serial.print(WiFi.SSID(i));
+                              Serial.print(",");
+                              Serial.print(WiFi.RSSI(i));
+                              Serial.print(",");
+                              Serial.print(WiFi.BSSIDstr(i));
+                              Serial.print(",");
+                              Serial.print(WiFi.channel(i));
+                            }
+                        }
+                    }
+                  else
+                    status = E_ERROR;
+                  ptr = cmdLen;
+                }
               else if( cmd[ptr]=='#' )
                 {
                   ptr++;
-                  if( strncmp(cmd+ptr, "BDR", 3)==0 )
+                  if( strncmpi(cmd+ptr, "BDR", 3)==0 )
                     {
                       ptr += 3;
                       if( cmd[ptr]=='?' )
