@@ -18,8 +18,6 @@
 // -----------------------------------------------------------------------------
 
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
 #include <EEPROM.h>
 
 
@@ -28,7 +26,7 @@
 
 WiFiServer server(23);
 WiFiClient serverClients[MAX_SRV_CLIENTS], modemClient;
-ESP8266WebServer webserver(80);
+
 unsigned long prevCharTime = 0;
 uint8_t modemEscapeState = 0, modemExtCodes = 0, modemReg[255];
 bool    modemCommandMode = true, modemEcho = true, modemQuiet = false, modemVerbose = true;
@@ -164,232 +162,6 @@ void applySerialSettings()
 }
 
 
-const int   baud[]   = {110, 150, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 256000, 512000, 921600, 0};
-const int   bits[]   = {5, 6, 7, 8, 0};
-const char *parity[] = {"No parity", "Even parity", "Odd parity", NULL};
-const char *stop[]   = {"One stop bit", "Two stop bits", NULL};
-
-
-void handleRoot() 
-{
-  char buffer2[100];
-  String s;
-  int i;
-
-  s = ("<html>\n"
-       "<head>\n"
-       "<title>ESP8266 Telnet-to-Serial Bridge</title>\n"
-       "</head>\n"
-       "<body>\n"
-       "<h1>ESP8266 Telnet-to-Serial Bridge</h1>\n");
-
-  s += "<h2>Baud rate</h1>\n<ul>\n";
-  for(i=0; baud[i]; i++)
-    {
-      if( (i==0 || baud[i-1]<SerialData.baud) && baud[i] > SerialData.baud )
-        {
-          snprintf(buffer2, 100, "<li><b>%i baud</b></li>", SerialData.baud);
-          s += String(buffer2);
-        }
-      
-      if( baud[i] == SerialData.baud )
-        snprintf(buffer2, 100, "<li><b>%i baud</b></li>", baud[i]);
-      else 
-        snprintf(buffer2, 100, "<li><a href=\"set?baud=%i\">%i baud</a></li>", baud[i], baud[i]);
-      
-      s += String(buffer2);
-    }
-
-
-  s += "</ul>\n<h2>Data bits</h2>\n<ul>\n";
-  for(i=0; bits[i]; i++)
-    {
-      if( SerialData.bits == bits[i] )
-        snprintf(buffer2, 100, "<li><b>%i bits</b></li>", bits[i]);
-      else 
-        snprintf(buffer2, 100, "<li><a href=\"set?bits=%i\">%i bits</a></li>", bits[i], bits[i]);
-      
-      s += String(buffer2);
-    }
-
-
-  s += "</ul>\n<h2>Parity</h2>\n<ul>\n";
-  for(i=0; parity[i]; i++)
-    {
-      if( SerialData.parity == i )
-        snprintf(buffer2, 100, "<li><b>%s</b></li>", parity[i]);
-      else
-        snprintf(buffer2, 100, "<li><a href=\"set?parity=%c\">%s</a></li>", parity[i][0], parity[i]);
-
-      s += String(buffer2);
-    }
-
-  s += "</ul>\n<h2>Stop bits</h2>\n<ul>\n";
-  for(i=0; stop[i]; i++)
-    {
-      if( SerialData.stopbits == i+1 )
-        snprintf(buffer2, 100, "<li><b>%s</b></li>", stop[i]); 
-      else 
-        snprintf(buffer2, 100, "<li><a href=\"set?stopbits=%i\">%s</a></li>", i+1, stop[i]);
-
-      s += String(buffer2);
-    }
-
-  s += "</ul>\n<h2>Show WiFi connection information</h2>\n<ul>\n";
-  if( SerialData.silent )
-    {
-      s += "<li><a href=\"set?silent=no\">Print to serial port after connecting</a></li>\n";
-      s += "<li><b>Do not show</b></li>\n";
-    }
-  else
-    {
-      s += "<li><b>Print to serial port after connecting</b></li>\n";
-      s += "<li><a href=\"set?silent=yes\">Do not show</a></li>\n";
-    }
-  
-  s += "</ul>\n<h2>Telnet protocol</h2>\n<ul>\n";
-  if( SerialData.handleTelnetProtocol )
-    {
-      int i;
-      const char *terminalTypes[] = {"none", "ansi", "teletype-33", "unknown", "vt100", "xterm", NULL};
-
-      s += "<li><b>Handle</b> - Report terminal type: ";
-      bool found = false;
-      for(i=0; terminalTypes[i]!=NULL; i++)
-        {
-          if( i>0 ) s += ", ";
-          if( strcmp(terminalTypes[i], SerialData.telnetTerminalType)==0 || (i==0 && SerialData.telnetTerminalType[0]==0) )
-            { s += "<b>" + String(terminalTypes[i]) + "</b>"; found = true; }
-          else
-            {
-              snprintf(buffer2, 100, "<a href=\"set?telnetTerminalType=%s\">%s</a>", terminalTypes[i], terminalTypes[i]);
-              s += String(buffer2);
-            }
-        }
-
-      if( !found ) s += ", <b>" + String(SerialData.telnetTerminalType) + "</b>";
-      s += "</li>\n";
-      s += "<li><a href=\"set?filterTelnet=no\">Pass through</a></li>\n";
-    }
-  else
-    {
-      s += "<li><a href=\"set?filterTelnet=yes\">Handle</a></li>\n";
-      s += "<li><b>Pass through</b></li>\n";
-    }
-  
-  s += "</ul>\n</body>\n</html>";
-  webserver.send(200, "text/html", s);
-}
-
-
-void handleSet()
-{
-  bool ok = webserver.args()>0;
-  for(int i=0; i<ok && webserver.args(); i++)
-    {
-      if( webserver.argName(i) == "baud" )
-        SerialData.baud = atoi(webserver.arg(i).c_str());
-      else if( webserver.argName(i) == "bits" )
-        {
-          byte bits = atoi(webserver.arg(i).c_str());
-          if( bits>=5 && bits<=8 )
-            SerialData.bits = bits;
-          else
-            ok = false;
-        }
-      else if( webserver.argName(i) == "parity" && webserver.arg(i)=="N" )
-        SerialData.parity = 0;
-      else if( webserver.argName(i) == "parity" && webserver.arg(i)=="E" )
-        SerialData.parity = 1;
-      else if( webserver.argName(i) == "parity" && webserver.arg(i)=="O" )
-        SerialData.parity = 2;
-      else if( webserver.argName(i) == "stopbits" && webserver.arg(i)=="1" )
-        SerialData.stopbits = 1;
-      else if( webserver.argName(i) == "stopbits" && webserver.arg(i)=="2" )
-        SerialData.stopbits = 2;
-      else if( webserver.argName(i) == "silent" && webserver.arg(i)=="yes" )
-        SerialData.silent = true;
-      else if( webserver.argName(i) == "silent" && webserver.arg(i)=="no" )
-        SerialData.silent = false;
-      else if( webserver.argName(i) == "filterTelnet" && webserver.arg(i)=="log" )
-        SerialData.handleTelnetProtocol = 2;
-      else if( webserver.argName(i) == "filterTelnet" && webserver.arg(i)=="yes" )
-        SerialData.handleTelnetProtocol = 1;
-      else if( webserver.argName(i) == "filterTelnet" && webserver.arg(i)=="no" )
-        SerialData.handleTelnetProtocol = 0;
-      else if( webserver.argName(i) == "telnetTerminalType" )
-        {
-          int j;
-          String ts = webserver.arg(i);
-          for(j=0; j<99 && j<ts.length() && ts[j]>=32 && ts[j]<127; j++)
-            SerialData.telnetTerminalType[j] = ts[j];
-          SerialData.telnetTerminalType[j] = 0;
-        }
-      else
-        ok = false;
-    }
-
-  if( ok ) 
-    {
-      EEPROM.put(768, SerialData);
-      EEPROM.commit();
-      applySerialSettings();
-    }
-
-  handleRoot();
-}
-
-
-void handleNotFound() 
-{
-  String message = "File Not Found\n\n";
-  message += "URI: ";
-  message += webserver.uri();
-  message += "\nMethod: ";
-  message += (webserver.method() == HTTP_GET) ? "GET" : "POST";
-  message += "\nArguments: ";
-  message += webserver.args();
-  message += "\n";
-
-  for (uint8_t i = 0; i < webserver.args(); i++)
-    message += " " + webserver.argName(i) + ": " + webserver.arg(i) + "\n";
-
-  webserver.send(404, "text/plain", message);
-}
-
-
-void readString(char *buffer, int buflen, bool password)
-{
-  int len = 0;
-  while( true )
-  {
-    if( Serial.available() )
-      {
-        char c = Serial.read();
-        if( c==10 || c==13 )
-          {
-            buffer[len] = 0;
-            return;
-          }
-        else if( (c==8 || c==127) && len>0 )
-          {
-            Serial.print(char(8)); Serial.print(' '); Serial.print(char(8));
-            len--;
-          }
-        else if( c >= 32 && len<buflen-1 )
-          {
-            buffer[len++] = c;
-            Serial.print(password ? '*' : c);
-          }
-      }
-    else
-      delay(10);
-      
-    yield();
-  }
-}
-
-
 void clearSerialBuffer()
 {
   // empty the serial buffer
@@ -435,12 +207,6 @@ void setup()
       if( WifiData.ssid[0] != '\0' )
         WiFi.begin(WifiData.ssid, WifiData.key);
     }
-
-  MDNS.begin("esp8266");
-  webserver.on("/", handleRoot);
-  webserver.on("/set", handleSet);
-  webserver.onNotFound(handleNotFound);
-  webserver.begin();
 
   server.begin();
   server.setNoDelay(true);
@@ -1456,6 +1222,4 @@ void loop()
     relayTelnetData();
   else if( modemCommandMode )
     handleModemCommand();
-
-  webserver.handleClient();
 }
