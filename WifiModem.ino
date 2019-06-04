@@ -26,6 +26,7 @@ WiFiClient modemClient;
 WiFiClient telnetClient;
 
 unsigned long prevCharTime = 0;
+unsigned long prevRingTime = 0;
 uint8_t modemEscapeState = 0, modemExtCodes = 0, modemReg[255];
 bool    modemCommandMode = true, modemEcho = true, modemQuiet = false, modemVerbose = true;
 
@@ -42,6 +43,8 @@ static int linespeeds[] = {0, 75, 110, 300, 600, 1200, 2400, 4800, 7200, 9600, 1
 #define REG_GUARDTIME     12
 #define REG_LINESPEED     37
 #define REG_CURLINESPEED  43
+
+#define RING_MILLIS       4500
 
 enum
   {
@@ -749,6 +752,26 @@ void handleModemCommand()
                   // ATD can not be followed by other commands
                   ptr = cmdLen;
                 }
+              else if( toupper(cmd[ptr])=='A' )
+                {
+                  // force at least 1 second before responding
+                  delay(1000);
+    
+                  if( server.hasClient() ) 
+                    {
+                      telnetClient = server.available();
+                      status = getConnectStatus();
+                  
+                      resetTelnetState(clientTelnetState);
+                      modemCommandMode = false;
+                      modemEscapeState=0;
+                    }
+                  else
+                    status = E_NOCARRIER;
+
+                  // ATA can not be followed by other commands
+                  ptr = cmdLen;
+                }
               else if( toupper(cmd[ptr])=='H' )
                 {
                   if( cmdLen-ptr==1 || toupper(cmd[ptr+1])=='0' )
@@ -1209,6 +1232,7 @@ void loop()
         {
           if( telnetClient ) telnetClient.stop();
           if( modemClient ) modemClient.stop();
+
           modemCommandMode = true;
           modemReg[REG_CURLINESPEED] = 0;
           printModemResult(E_NOCARRIER);
@@ -1217,18 +1241,41 @@ void loop()
       // check if there are any new telnet clients
       if( server.hasClient() ) 
         {
-          printModemResult(E_RING);
+          if( millis()-prevRingTime > RING_MILLIS )
+            {
+              if( modemReg[1] >= 10 )
+                {
+                  // failsafe, after 10 rings we are not going to answer...
+                  server.available().stop();
+                  prevRingTime = 0;
+                  modemReg[1] = 0;
+                }
+              else
+                {
+                  printModemResult(E_RING);
+                  prevRingTime = millis();
+                  modemReg[1]++;
+                }
+            }
 
-          // force at least 1 second before responding
-          delay(1000);
+          if( modemReg[0] != 0 && modemReg[1] >= modemReg[0] )
+            {
+              // force at least 1 second before responding
+              delay(1000);
 
-          telnetClient = server.available();
-          int i = getConnectStatus();
-          printModemResult(i);
+              telnetClient = server.available();
+              int i = getConnectStatus();
+              printModemResult(i);
           
-          resetTelnetState(clientTelnetState);
-          modemEscapeState=0;
-          modemCommandMode = false;
+              resetTelnetState(clientTelnetState);
+              modemEscapeState=0;
+              modemCommandMode = false;
+            }
+        }
+      else
+        {
+          prevRingTime = 0;
+          modemReg[1] = 0;
         }
     }
 
