@@ -21,11 +21,9 @@
 #include <EEPROM.h>
 
 
-//how many clients should be able to telnet to this ESP8266
-#define MAX_SRV_CLIENTS 3
-
 WiFiServer server(23);
-WiFiClient serverClients[MAX_SRV_CLIENTS], modemClient;
+WiFiClient modemClient;
+WiFiClient telnetClient;
 
 unsigned long prevCharTime = 0;
 uint8_t modemEscapeState = 0, modemExtCodes = 0, modemReg[255];
@@ -73,7 +71,7 @@ struct TelnetStateStruct
   bool receiveBinary;
   bool receivedCR;
   bool subnegotiation;
-} modemTelnetState, clientTelnetState[MAX_SRV_CLIENTS];
+} modemTelnetState, clientTelnetState;
 
 
 #define MAGICVAL 0xF0E1D2C3B4A59687
@@ -218,16 +216,6 @@ void setup()
 }
 
 
-bool haveTelnetClient()
-{
-  for( int i=0; i<MAX_SRV_CLIENTS; i++ )
-    if( serverClients[i] && serverClients[i].connected() )
-      return true;
-
-  return false;
-}
-
-
 void resetTelnetState(struct TelnetStateStruct &s)
 {
   s.cmdLen = 0;
@@ -265,6 +253,7 @@ void resetModemState()
   modemVerbose = true;
   
   if( modemClient.connected() ) modemClient.stop();
+  if( telnetClient.connected() ) telnetClient.stop();
 }
 
 
@@ -569,6 +558,46 @@ int strncmpi(const char *s1, const char *s2, size_t cchars)
 }
 
 
+int getConnectStatus()
+{
+  int res;
+  
+  if( modemReg[REG_LINESPEED]==0 )
+    {
+      int i = 0;
+      while( i<NSPEEDS && linespeeds[i]<SerialData.baud ) i++;
+      if( i==NSPEEDS )
+        modemReg[REG_CURLINESPEED] = 255;
+      else if( linespeeds[i]==SerialData.baud )
+        modemReg[REG_CURLINESPEED] = i;
+      else
+        modemReg[REG_CURLINESPEED] = i-1;
+    }
+  else if( modemReg[REG_LINESPEED] < NSPEEDS )
+    modemReg[REG_CURLINESPEED] = min(modemReg[REG_LINESPEED], byte(NSPEEDS-1));
+
+  if( modemExtCodes==0 )
+    {
+      res = E_CONNECT;
+    }
+  else
+    {
+      switch( modemReg[REG_CURLINESPEED] )
+        {
+        case 3: res = E_CONNECT; break;
+        case 4: res = E_CONNECT600; break;
+        case 5: res = E_CONNECT1200; break;
+        case 6: res = E_CONNECT2400; break;
+        case 7: res = E_CONNECT4800; break;
+        case 9: res = E_CONNECT9600; break;
+        default: res = E_CONNECT; break;
+        }
+    }
+
+    return res;
+}
+
+
 void handleModemCommand()
 {
   // check if a modem AT command was received
@@ -701,41 +730,9 @@ void handleModemCommand()
                           modemCommandMode = false;
                           modemEscapeState = 0;
                           resetTelnetState(modemTelnetState);
-                                
-                          if( modemReg[REG_LINESPEED]==0 )
-                            {
-                              int i = 0;
-                              while( i<NSPEEDS && linespeeds[i]<SerialData.baud ) i++;
-                              if( i==NSPEEDS )
-                                modemReg[REG_CURLINESPEED] = 255;
-                              else if( linespeeds[i]==SerialData.baud )
-                                modemReg[REG_CURLINESPEED] = i;
-                              else
-                                modemReg[REG_CURLINESPEED] = i-1;
-                            }
-                          else if( modemReg[REG_LINESPEED] < NSPEEDS )
-                            modemReg[REG_CURLINESPEED] = min(modemReg[REG_LINESPEED], byte(NSPEEDS-1));
 
-                          if( modemExtCodes==0 )
-                            {
-                              status = E_CONNECT;
-                              connecting = true;
-                            }
-                          else
-                            {
-                              switch( modemReg[REG_CURLINESPEED] )
-                                {
-                                case 3: status = E_CONNECT; break;
-                                case 4: status = E_CONNECT600; break;
-                                case 5: status = E_CONNECT1200; break;
-                                case 6: status = E_CONNECT2400; break;
-                                case 7: status = E_CONNECT4800; break;
-                                case 9: status = E_CONNECT9600; break;
-                                default: status = E_CONNECT; break;
-                                }
-
-                              connecting = true;
-                            }
+                          status = getConnectStatus();
+                          connecting = true;
                         }
                       else if( modemExtCodes < 2 )
                         status = E_NOCARRIER;
@@ -757,11 +754,11 @@ void handleModemCommand()
                   if( cmdLen-ptr==1 || toupper(cmd[ptr+1])=='0' )
                     {
                       // hang up
-                      if( modemClient.connected() ) 
-                        {
+                      if( modemClient && modemClient.connected() ) 
                           modemClient.stop();
-                          modemReg[REG_CURLINESPEED] = 0;
-                        }
+                      if( telnetClient && telnetClient.connected() ) 
+                          telnetClient.stop();
+                      modemReg[REG_CURLINESPEED] = 0;
                     }
 
                   ptr += 2;
@@ -769,7 +766,13 @@ void handleModemCommand()
               else if( toupper(cmd[ptr])=='O' )
                 {
                   getCmdParam(cmd, ptr);
-                  if( modemClient.connected() )
+                  if( modemClient && modemClient.connected() )
+                    {
+                      modemCommandMode = false;
+                      modemEscapeState = 0;
+                      break;
+                    }
+                  if( telnetClient && telnetClient.connected() )
                     {
                       modemCommandMode = false;
                       modemEscapeState = 0;
@@ -1109,22 +1112,29 @@ void relayModemData()
 
 void relayTelnetData()
 {
-  int i;
-
-  //check clients for data
-  for (i = 0; i < MAX_SRV_CLIENTS; i++) {
-    if (serverClients[i] && serverClients[i].connected()) {
-      if (serverClients[i].available()) {
-        //get data from the telnet client and push it to the UART
-        unsigned long t = millis();
-        while(serverClients[i].available() && Serial.availableForWrite() && millis()-t < 100)
-          {
-            uint8_t b = serverClients[i].read();
-            if( !handleTelnetProtocol(b, serverClients[i], clientTelnetState[i]) ) Serial.write(b);
-          }
-      }
+  if (telnetClient.available())
+    {
+      //get data from the telnet client and push it to the UART
+      unsigned long t = millis();
+      while(telnetClient.available() && Serial.availableForWrite() && millis()-t < 100)
+        {
+          uint8_t b = telnetClient.read();
+          if( !handleTelnetProtocol(b, telnetClient, clientTelnetState) ) Serial.write(b);
+        }
     }
-  }
+
+  if( millis() > prevCharTime + 20*modemReg[REG_GUARDTIME] )
+    {
+      if( modemEscapeState==0 )
+        modemEscapeState = 1;
+      else if( modemEscapeState==4 )
+        {
+          // received [1 second pause] +++ [1 second pause]
+          // => switch to command mode
+          modemCommandMode = true;
+          printModemResult(E_OK);
+        }
+    }
           
   //check UART for data
   if( Serial.available() )
@@ -1138,10 +1148,16 @@ void relayTelnetData()
         {
           uint8_t b = Serial.read();
           buf[n++] = b;
+          prevCharTime = millis();
               
           // if Telnet protocol handling is enabled then we need to duplicate IAC tokens
           // if they occur in the general data stream
           if( b==T_IAC && SerialData.handleTelnetProtocol ) buf[n++] = b;
+
+          if( modemEscapeState>=1 && modemEscapeState<=3 && b==modemReg[REG_ESC] )
+            modemEscapeState++;
+          else
+            modemEscapeState=0;
               
           // wait a short time to see if another character is coming in so we
           // can send multi-character (escape) sequences in the same packet
@@ -1150,32 +1166,26 @@ void relayTelnetData()
         }
 
       // push UART data to all connected telnet clients
-      for (i = 0; i < MAX_SRV_CLIENTS; i++) 
-        if( serverClients[i] && serverClients[i].connected() )
-          {
-            if( !SerialData.handleTelnetProtocol || clientTelnetState[i].sendBinary )
-              serverClients[i].write(buf, n);
-            else
-              {
-                // if sending in telnet non-binary mode then a stand-alone CR (without LF) must be followd by NUL
-                uint8_t buf2[512];
-                int j, m = 0;
-                for(j=0; j<n; j++)
-                  {
-                    buf2[m++] = buf[j];
-                    if( buf[j]==0x0d && (j>=n-1 || buf[j+1]!=0x0a) ) buf2[m++] = 0;
-                  }
-                serverClients[i].write(buf2, m);
-              }
-          }
+      if( !SerialData.handleTelnetProtocol || clientTelnetState.sendBinary )
+        telnetClient.write(buf, n);
+      else
+        {
+          // if sending in telnet non-binary mode then a stand-alone CR (without LF) must be followd by NUL
+          uint8_t buf2[512];
+          int j, m = 0;
+          for(j=0; j<n; j++)
+            {
+              buf2[m++] = buf[j];
+              if( buf[j]==0x0d && (j>=n-1 || buf[j+1]!=0x0a) ) buf2[m++] = 0;
+            }
+          telnetClient.write(buf2, m);
+        }
     }
 }
 
 
 void loop() 
 {
-  uint8_t i;
-
   if( modemClient && modemClient.connected() )
     {
       // modem is connected. if telnet server has new client then reject
@@ -1184,12 +1194,21 @@ void loop()
       // only relay data if not in command mode
       if( !modemCommandMode ) relayModemData();
     }
+  else if( telnetClient && telnetClient.connected() )
+    {
+      // modem is connected. if telnet server has new client then reject
+      if( server.hasClient() ) server.available().stop();
+
+      // only relay data if not in command mode
+      if( !modemCommandMode ) relayTelnetData();
+    }
   else
     {
       // check whether connection to modem client was lost
       if( !modemCommandMode )
         {
-          modemClient.stop();
+          if( telnetClient ) telnetClient.stop();
+          if( modemClient ) modemClient.stop();
           modemCommandMode = true;
           modemReg[REG_CURLINESPEED] = 0;
           printModemResult(E_NOCARRIER);
@@ -1198,28 +1217,21 @@ void loop()
       // check if there are any new telnet clients
       if( server.hasClient() ) 
         {
-          // find free/disconnected spot
-          for( i=0; i<MAX_SRV_CLIENTS; i++ )
-            {
-              if( !serverClients[i] || !serverClients[i].connected() ) 
-                {
-                  serverClients[i] = server.available();
-                  resetTelnetState(clientTelnetState[i]);
-                  break;
-                }
-            }
+          printModemResult(E_RING);
+
+          // force at least 1 second before responding
+          delay(1000);
+
+          telnetClient = server.available();
+          int i = getConnectStatus();
+          printModemResult(i);
           
-          //no free/disconnected spot so reject
-          if( i == MAX_SRV_CLIENTS )
-            {
-              WiFiClient serverClient = server.available();
-              serverClient.stop();
-            }
+          resetTelnetState(clientTelnetState);
+          modemEscapeState=0;
+          modemCommandMode = false;
         }
     }
 
-  if( haveTelnetClient() )
-    relayTelnetData();
-  else if( modemCommandMode )
+  if( modemCommandMode )
     handleModemCommand();
 }
