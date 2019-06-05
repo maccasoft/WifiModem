@@ -25,6 +25,7 @@ WiFiServer server(23);
 WiFiClient modemClient;
 WiFiClient telnetClient;
 
+unsigned long lastConnectCheck = 0;
 unsigned long prevCharTime = 0;
 unsigned long prevRingTime = 0;
 uint8_t modemEscapeState = 0, modemExtCodes = 0, modemReg[255];
@@ -78,76 +79,72 @@ struct TelnetStateStruct
 
 
 #define MAGICVAL 0xF0E1D2C3B4A59687
-struct WiFiDataStruct
+
+struct ModemDataStruct
 {
   uint64_t magic;
-  char     ssid[256];
-  char     key[256];
-} WifiData;
 
-
-struct SerialDataStruct
-{
-  uint64_t magic;
   uint32_t baud;
   byte     bits;
   byte     parity;
   byte     stopbits;
   byte     silent;
   byte     handleTelnetProtocol;
-  char     telnetTerminalType[100];
-} SerialData;
+  char     telnetTerminalType[32];
+
+  uint8_t  reg[256];
+} ModemData;
 
 
 SerialConfig GetSerialConfig()
 {
-  if( SerialData.bits==5 && SerialData.parity==0 && SerialData.stopbits==1 )
+  if( ModemData.bits==5 && ModemData.parity==0 && ModemData.stopbits==1 )
     return SERIAL_5N1;
-  else if( SerialData.bits==5 && SerialData.parity==0 && SerialData.stopbits==2 )
+  else if( ModemData.bits==5 && ModemData.parity==0 && ModemData.stopbits==2 )
     return SERIAL_5N2;
-  else if( SerialData.bits==5 && SerialData.parity==1 && SerialData.stopbits==1 )
+  else if( ModemData.bits==5 && ModemData.parity==1 && ModemData.stopbits==1 )
     return SERIAL_5E1;
-  else if( SerialData.bits==5 && SerialData.parity==1 && SerialData.stopbits==2 )
+  else if( ModemData.bits==5 && ModemData.parity==1 && ModemData.stopbits==2 )
     return SERIAL_5E2;
-  else if( SerialData.bits==5 && SerialData.parity==2 && SerialData.stopbits==1 )
+  else if( ModemData.bits==5 && ModemData.parity==2 && ModemData.stopbits==1 )
     return SERIAL_5O1;
-  else if( SerialData.bits==5 && SerialData.parity==2 && SerialData.stopbits==2 )
+  else if( ModemData.bits==5 && ModemData.parity==2 && ModemData.stopbits==2 )
     return SERIAL_5O2;
-  else if( SerialData.bits==6 && SerialData.parity==0 && SerialData.stopbits==1 )
+  else if( ModemData.bits==6 && ModemData.parity==0 && ModemData.stopbits==1 )
     return SERIAL_6N1;
-  else if( SerialData.bits==6 && SerialData.parity==0 && SerialData.stopbits==2 )
+  else if( ModemData.bits==6 && ModemData.parity==0 && ModemData.stopbits==2 )
     return SERIAL_6N2;
-  else if( SerialData.bits==6 && SerialData.parity==1 && SerialData.stopbits==1 )
+  else if( ModemData.bits==6 && ModemData.parity==1 && ModemData.stopbits==1 )
     return SERIAL_6E1;
-  else if( SerialData.bits==6 && SerialData.parity==1 && SerialData.stopbits==2 )
+  else if( ModemData.bits==6 && ModemData.parity==1 && ModemData.stopbits==2 )
     return SERIAL_6E2;
-  else if( SerialData.bits==6 && SerialData.parity==2 && SerialData.stopbits==1 )
+  else if( ModemData.bits==6 && ModemData.parity==2 && ModemData.stopbits==1 )
     return SERIAL_6O1;
-  else if( SerialData.bits==6 && SerialData.parity==2 && SerialData.stopbits==2 )
+  else if( ModemData.bits==6 && ModemData.parity==2 && ModemData.stopbits==2 )
     return SERIAL_6O2;
-  else if( SerialData.bits==7 && SerialData.parity==0 && SerialData.stopbits==1 )
+  else if( ModemData.bits==7 && ModemData.parity==0 && ModemData.stopbits==1 )
     return SERIAL_7N1;
-  else if( SerialData.bits==7 && SerialData.parity==0 && SerialData.stopbits==2 )
+  else if( ModemData.bits==7 && ModemData.parity==0 && ModemData.stopbits==2 )
     return SERIAL_7N2;
-  else if( SerialData.bits==7 && SerialData.parity==1 && SerialData.stopbits==1 )
+  else if( ModemData.bits==7 && ModemData.parity==1 && ModemData.stopbits==1 )
     return SERIAL_7E1;
-  else if( SerialData.bits==7 && SerialData.parity==1 && SerialData.stopbits==2 )
+  else if( ModemData.bits==7 && ModemData.parity==1 && ModemData.stopbits==2 )
     return SERIAL_7E2;
-  else if( SerialData.bits==7 && SerialData.parity==2 && SerialData.stopbits==1 )
+  else if( ModemData.bits==7 && ModemData.parity==2 && ModemData.stopbits==1 )
     return SERIAL_7O1;
-  else if( SerialData.bits==7 && SerialData.parity==2 && SerialData.stopbits==2 )
+  else if( ModemData.bits==7 && ModemData.parity==2 && ModemData.stopbits==2 )
     return SERIAL_7O2;
-  else if( SerialData.bits==8 && SerialData.parity==0 && SerialData.stopbits==1 )
+  else if( ModemData.bits==8 && ModemData.parity==0 && ModemData.stopbits==1 )
     return SERIAL_8N1;
-  else if( SerialData.bits==8 && SerialData.parity==0 && SerialData.stopbits==2 )
+  else if( ModemData.bits==8 && ModemData.parity==0 && ModemData.stopbits==2 )
     return SERIAL_8N2;
-  else if( SerialData.bits==8 && SerialData.parity==1 && SerialData.stopbits==1 )
+  else if( ModemData.bits==8 && ModemData.parity==1 && ModemData.stopbits==1 )
     return SERIAL_8E1;
-  else if( SerialData.bits==8 && SerialData.parity==1 && SerialData.stopbits==2 )
+  else if( ModemData.bits==8 && ModemData.parity==1 && ModemData.stopbits==2 )
     return SERIAL_8E2;
-  else if( SerialData.bits==8 && SerialData.parity==2 && SerialData.stopbits==1 )
+  else if( ModemData.bits==8 && ModemData.parity==2 && ModemData.stopbits==1 )
     return SERIAL_8O1;
-  else if( SerialData.bits==8 && SerialData.parity==2 && SerialData.stopbits==2 )
+  else if( ModemData.bits==8 && ModemData.parity==2 && ModemData.stopbits==2 )
     return SERIAL_8O2;
   else
     return SERIAL_8N1;
@@ -159,7 +156,7 @@ void applySerialSettings()
   Serial.flush();
   Serial.end();
   delay(100);
-  Serial.begin(SerialData.baud, GetSerialConfig());
+  Serial.begin(ModemData.baud, GetSerialConfig());
 }
 
 
@@ -173,41 +170,41 @@ void clearSerialBuffer()
 
 void setup() 
 {
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+
   // read serial info
   EEPROM.begin(1024);
-  EEPROM.get(768, SerialData);
-  if( SerialData.magic != MAGICVAL )
+  EEPROM.get(0, ModemData);
+  if( ModemData.magic != MAGICVAL )
     {
       // use default settings
-      SerialData.baud     = 9600;
-      SerialData.bits     = 8;
-      SerialData.parity   = 0;
-      SerialData.stopbits = 1;
-      SerialData.silent   = false;
-      SerialData.handleTelnetProtocol = 1;
-      strcpy(SerialData.telnetTerminalType, "vt100");
-      SerialData.magic    = MAGICVAL;
-    }
-  else
-    {
-      // make sure terminal type string is ASCII and 0-terminated
-      int i = 0;
-      while(i<99 && SerialData.telnetTerminalType[i]>=32 && SerialData.telnetTerminalType[i]<127) i++;
-      SerialData.telnetTerminalType[i]=0;
+      memset(&ModemData, 0, sizeof(ModemData));
+      ModemData.magic    = MAGICVAL;
+      ModemData.baud     = 9600;
+      ModemData.bits     = 8;
+      ModemData.parity   = 0;
+      ModemData.stopbits = 1;
+      ModemData.silent   = false;
+      ModemData.handleTelnetProtocol = 1;
+      strcpy(ModemData.telnetTerminalType, "vt100");
+      EEPROM.put(0, ModemData);
+      EEPROM.commit();
     }
   
   // start serial interface
-  Serial.begin(SerialData.baud);
+  Serial.begin(ModemData.baud);
 
-  // read WiFi info
+  // set sdk parameters
+  if (!WiFi.getAutoConnect() ) WiFi.setAutoConnect(true);
+  if (!WiFi.getAutoReconnect() ) WiFi.setAutoReconnect(true);
+  if (!WiFi.getPersistent() ) WiFi.persistent(true);
+
+  // start WiFi interface
   WiFi.mode(WIFI_STA);
-  EEPROM.get(0, WifiData);
-  if( WifiData.magic == MAGICVAL ) 
-    {
-      // start WiFi interface
-      if( WifiData.ssid[0] != '\0' )
-        WiFi.begin(WifiData.ssid, WifiData.key);
-    }
+  WiFi.begin();
+
+  lastConnectCheck = millis();
 
   server.begin();
   server.setNoDelay(true);
@@ -361,13 +358,13 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
 #define TO_TERMINAL_TYPE      24
 
   // if not handling telnet protocol then just return
-  if( !SerialData.handleTelnetProtocol ) return false;
+  if( !ModemData.handleTelnetProtocol ) return false;
 
   // ---- handle incoming sub-negotiation sequences
 
   if( state.subnegotiation )
     {
-      if( SerialData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+      if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
 
       if( state.cmdLen==0 && b == T_IAC )
         state.cmdLen = 1; 
@@ -390,7 +387,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
       if( b==0 )
         {
           // CR->NUL => CR (i.e. ignore the NUL)
-          if( SerialData.handleTelnetProtocol>1 ) Serial.print("<0d<00");
+          if( ModemData.handleTelnetProtocol>1 ) Serial.print("<0d<00");
           return true;
         }
     }
@@ -410,13 +407,13 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
         {
           state.cmdLen = 1;
           state.cmd[0] = T_IAC;
-          if( SerialData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+          if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
           return true;
         }
     }
   else if( state.cmdLen==1 )
     {
-      if( SerialData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+      if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
       // received second byte of IAC sequence
       if( b == T_IAC )
         {
@@ -450,7 +447,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
   else if( state.cmdLen==2 )
     {
       // received third (i.e. last) byte of IAC sequence
-      if( SerialData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+      if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
       state.cmd[2] = b;
 
       bool reply = true;
@@ -478,7 +475,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
             {
             case TO_SEND_BINARY:       state.cmd[1] = T_WILL; state.sendBinary = true; break;
             case TO_SUPPRESS_GO_AHEAD: state.cmd[1] = T_WILL; break;
-            case TO_TERMINAL_TYPE:     state.cmd[1] = SerialData.telnetTerminalType[0]==0 ? T_WONT : T_WILL; break;
+            case TO_TERMINAL_TYPE:     state.cmd[1] = ModemData.telnetTerminalType[0]==0 ? T_WONT : T_WILL; break;
             default: state.cmd[1] = T_WONT; break;
             }
         }
@@ -496,7 +493,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
       // send reply if necessary
       if( reply ) 
         {
-          if( SerialData.handleTelnetProtocol>1 )
+          if( ModemData.handleTelnetProtocol>1 )
             for(int k=0; k<3; k++) {Serial.print('>'); Serial.print(state.cmd[k], HEX);}
 
           client.write(state.cmd, 3);
@@ -509,12 +506,12 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
               buf[n++] = T_SB;
               buf[n++] = TO_TERMINAL_TYPE;
               buf[n++] = 0; // IS
-              for(i=0; i<100 && SerialData.telnetTerminalType[i]>=32 && SerialData.telnetTerminalType[i]<127; i++) 
-                buf[n++] = SerialData.telnetTerminalType[i];
+              for(i=0; i<100 && ModemData.telnetTerminalType[i]>=32 && ModemData.telnetTerminalType[i]<127; i++) 
+                buf[n++] = ModemData.telnetTerminalType[i];
               buf[n++] = T_IAC;
               buf[n++] = T_SE;
               client.write(buf, n);
-              if( SerialData.handleTelnetProtocol>1 )
+              if( ModemData.handleTelnetProtocol>1 )
                 for(int k=0; k<n; k++) {Serial.print('>'); Serial.print(buf[k], HEX);}
             }
         }
@@ -568,10 +565,10 @@ int getConnectStatus()
   if( modemReg[REG_LINESPEED]==0 )
     {
       int i = 0;
-      while( i<NSPEEDS && linespeeds[i]<SerialData.baud ) i++;
+      while( i<NSPEEDS && linespeeds[i]<ModemData.baud ) i++;
       if( i==NSPEEDS )
         modemReg[REG_CURLINESPEED] = 255;
-      else if( linespeeds[i]==SerialData.baud )
+      else if( linespeeds[i]==ModemData.baud )
         modemReg[REG_CURLINESPEED] = i;
       else
         modemReg[REG_CURLINESPEED] = i-1;
@@ -737,7 +734,7 @@ void handleModemCommand()
                           status = getConnectStatus();
                           connecting = true;
                         }
-                      else if( modemExtCodes < 2 )
+                      else if( modemExtCodes==0 )
                         status = E_NOCARRIER;
                       else if( WiFi.status() != WL_CONNECTED )
                         status = E_NODIALTONE;
@@ -813,7 +810,7 @@ void handleModemCommand()
               else if( toupper(cmd[ptr])=='Z' )
                 {
                   // reset serial settings to saved value
-                  EEPROM.get(768, SerialData);
+                  EEPROM.get(0, ModemData);
                   applySerialSettings();
 
                   // reset parameters (ignore command parameter)
@@ -851,21 +848,86 @@ void handleModemCommand()
               else if( toupper(cmd[ptr])=='I' )
                 {
                   byte n = getCmdParam(cmd, ptr);
-                  if (n == 2)
+                  if( n == 0 )
+                    {
+                      printModemCR();
+                      Serial.print("WiFi Modem 1.0");
+                      printModemCR();
+                      Serial.print("SSID=");
+                      Serial.print(WiFi.SSID());
+                      printModemCR();
+                      Serial.print("IP=");
+                      Serial.print(WiFi.localIP());
+                      printModemCR();
+                      Serial.print("MAC=");
+                      Serial.print(WiFi.macAddress());
+                    }
+                  else if( n == 1 || n == 5 )
+                    {
+                      bool showAll = (n == 5);
+                      printModemCR();
+                      Serial.print("AT");
+                      Serial.print(modemEcho ? "E1" : "E0");
+                      if( modemQuiet )
+                        {
+                          Serial.print("Q1");
+                          if( showAll )
+                          {
+                            Serial.print(modemVerbose ? "V1" : "V0");
+                            Serial.print(modemExtCodes ? "X1" : "X0");
+                          }
+                        }
+                      else
+                        {
+                          Serial.print("Q0");
+                          Serial.print(modemVerbose ? "V1" : "V0");
+                          Serial.print(modemExtCodes ? "X1" : "X0");
+                        }
+                      Serial.print("S0=");
+                      Serial.print(modemReg[0]);
+                      if( modemReg[REG_ESC] != '+' || showAll )
+                        {
+                          Serial.print("S2=");
+                          Serial.print(modemReg[REG_ESC]);
+                        }
+                      if( modemReg[REG_CR] != 13 || showAll )
+                        {
+                          Serial.print("S3=");
+                          Serial.print(modemReg[REG_CR]);
+                        }
+                      if( modemReg[REG_LF] != 10 || showAll )
+                        {
+                          Serial.print("S4=");
+                          Serial.print(modemReg[REG_LF]);
+                        }
+                      if( modemReg[REG_BSP] != 8 || showAll )
+                        {
+                          Serial.print("S5=");
+                          Serial.print(modemReg[REG_BSP]);
+                        }
+                    }
+                  else if( n == 2 )
                     {
                       printModemCR();
                       Serial.print(WiFi.localIP());
                     }
-                  else if (n == 3)
+                  else if( n == 3 )
                     {
                       printModemCR();
-                      Serial.print(WifiData.ssid);
+                      Serial.print(WiFi.SSID());
                     }
-                  else if (n == 6)
+                  else if( n == 4 )
+                    {
+                      printModemCR();
+                      Serial.print("1.0");
+                    }
+                  else if( n == 6 )
                     {
                       printModemCR();
                       Serial.print(WiFi.macAddress());
                     }
+                  else
+                    status = E_ERROR;
                 }
               else if( toupper(cmd[ptr])=='M' || toupper(cmd[ptr])=='L' || toupper(cmd[ptr])=='A' || toupper(cmd[ptr])=='P' || toupper(cmd[ptr])=='T' )
                 {
@@ -878,20 +940,18 @@ void handleModemCommand()
                   if( toupper(cmd[ptr])=='W' )
                     {
                       getCmdParam(cmd, ptr);
-                      EEPROM.put(0, WifiData);
-                      EEPROM.commit();
-                      EEPROM.put(768, SerialData);
+                      EEPROM.put(0, ModemData);
                       EEPROM.commit();
                     }
                   else if( toupper(cmd[ptr])=='F')
                     {
-                      SerialData.baud     = 9600;
-                      SerialData.bits     = 8;
-                      SerialData.parity   = 0;
-                      SerialData.stopbits = 1;
-                      SerialData.silent   = false;
-                      SerialData.handleTelnetProtocol = 1;
-                      strcpy(SerialData.telnetTerminalType, "vt100");
+                      ModemData.baud     = 9600;
+                      ModemData.bits     = 8;
+                      ModemData.parity   = 0;
+                      ModemData.stopbits = 1;
+                      ModemData.silent   = false;
+                      ModemData.handleTelnetProtocol = 1;
+                      strcpy(ModemData.telnetTerminalType, "vt100");
                       
                       applySerialSettings();
     
@@ -916,45 +976,38 @@ void handleModemCommand()
                       ptr += 5;
                       if( cmd[ptr]=='=')
                         {
-                          char ssid[32], key[32];
+                          char ssid[32], key[64];
+
                           getCmdParam(cmd, ssid, ptr);
                           if( cmd[ptr]==',' )
                             {
                               getCmdParam(cmd, key, ptr);
                             }
-                          if( ssid[0]!=0 && key[0]!=0 )
+
+                          WiFi.disconnect();
+                          while( WiFi.status() == WL_CONNECTED )
                             {
-                              if( WiFi.status() == WL_CONNECTED )
-                                {
-                                  WiFi.disconnect();
-                                  while(WiFi.status() == WL_CONNECTED )
-                                    delay(250);
-                                }
-
-                              memset(WifiData.ssid, 0, sizeof(WifiData.ssid));
-                              strcpy(WifiData.ssid, ssid);
-
-                              memset(WifiData.key, 0, sizeof(WifiData.key));
-                              strcpy(WifiData.key, key);
-                                  
-                              WiFi.begin(WifiData.ssid, WifiData.key);
-
-                              // try to connect to WiFi
-                              uint8_t i = 0;
-                              while(WiFi.status() != WL_CONNECTED && i++ < 40 )
-                              {
-                                delay(250);
-                                if( Serial.available()>0 && Serial.read() == 27 ) break;
-                              }
-
-                              if( WiFi.status() != WL_CONNECTED )
-                                {
-                                  if( i == 41 )
-                                    status = E_ERROR;
-                                }
+                              delay(250);
+                              if( Serial.available()>0 && Serial.read() == 27 ) break;
                             }
-                          else
-                            status = E_ERROR;
+
+                          WiFi.begin(ssid, key);
+
+                          // try to connect to WiFi
+                          uint8_t i = 0;
+                          while( WiFi.status() != WL_CONNECTED && i++ < 40 )
+                          {
+                            delay(250);
+                            if( Serial.available()>0 && Serial.read() == 27 ) break;
+                          }
+
+                          if( WiFi.status() != WL_CONNECTED )
+                            {
+                              if( i == 41 )
+                                status = E_ERROR;
+                            }
+
+                          lastConnectCheck = millis();
                         }
                       else
                         status = E_ERROR;
@@ -962,10 +1015,11 @@ void handleModemCommand()
                   else if( strncmpi(cmd+ptr, "CWQAP", 5)==0 )
                     {
                       WiFi.disconnect();
-                      memset(WifiData.ssid, 0, sizeof(WifiData.ssid));
-                      memset(WifiData.key, 0, sizeof(WifiData.key));
-                      while(WiFi.status() == WL_CONNECTED )
-                        delay(250);
+                      while( WiFi.status() == WL_CONNECTED )
+                        {
+                          delay(250);
+                          if( Serial.available()>0 && Serial.read() == 27 ) break;
+                        }
                     }
                   else if( strncmpi(cmd+ptr, "CWLAP", 5)==0 )
                     {
@@ -994,21 +1048,21 @@ void handleModemCommand()
                       int i = getCmdParam(cmd, ptr);
                       if ( i!=0 )
                         {
-                          SerialData.baud = i;
+                          ModemData.baud = i;
                           if( cmd[ptr]==',' )
                             {
                               i = getCmdParam(cmd, ptr);
-                              SerialData.bits = i;
+                              ModemData.bits = i;
                             }
                           if( cmd[ptr]==',' )
                             {
                               i = getCmdParam(cmd, ptr);
-                              SerialData.stopbits = i;
+                              ModemData.stopbits = i;
                             }
                           if( cmd[ptr]==',' )
                             {
                               i = getCmdParam(cmd, ptr);
-                              SerialData.parity = i;
+                              ModemData.parity = i;
                             }
                           if( cmd[ptr]==',' )
                             {
@@ -1048,9 +1102,9 @@ void relayModemData()
 {
   if( modemClient && modemClient.connected() && modemClient.available() ) 
     {
-      int baud = modemReg[REG_CURLINESPEED]==255 ? SerialData.baud : linespeeds[modemReg[REG_CURLINESPEED]];
+      int baud = modemReg[REG_CURLINESPEED]==255 ? ModemData.baud : linespeeds[modemReg[REG_CURLINESPEED]];
 
-      if( baud == SerialData.baud )
+      if( baud == ModemData.baud )
         {
           // use full modem<->computer data rate
           unsigned long t = millis();
@@ -1092,7 +1146,7 @@ void relayModemData()
   if( Serial.available() )
     {
       uint8_t buf[256];
-      int n = 0, millisPerChar = 1000 / (SerialData.baud / (1+SerialData.bits+SerialData.stopbits)) + 1;
+      int n = 0, millisPerChar = 1000 / (ModemData.baud / (1+ModemData.bits+ModemData.stopbits)) + 1;
       unsigned long startTime = millis();
               
       if( millisPerChar<5 ) millisPerChar = 5;
@@ -1100,7 +1154,7 @@ void relayModemData()
         {
           uint8_t b = Serial.read();
 
-          if( SerialData.handleTelnetProtocol )
+          if( ModemData.handleTelnetProtocol )
             {
               // Telnet protocol handling is enabled
 
@@ -1126,7 +1180,7 @@ void relayModemData()
         }
               
       // if not sending in binary mode then a stand-alone CR (without LF) must be followd by NUL
-      if( SerialData.handleTelnetProtocol && !modemTelnetState.sendBinary && buf[n-1] == 0x0d && !Serial.available() ) buf[n++] = 0;
+      if( ModemData.handleTelnetProtocol && !modemTelnetState.sendBinary && buf[n-1] == 0x0d && !Serial.available() ) buf[n++] = 0;
 
       modemClient.write(buf, n);
     }
@@ -1163,7 +1217,7 @@ void relayTelnetData()
   if( Serial.available() )
     {
       uint8_t buf[256];
-      int n = 0, millisPerChar = 1000 / (SerialData.baud / (1+SerialData.bits+SerialData.stopbits))+1;
+      int n = 0, millisPerChar = 1000 / (ModemData.baud / (1+ModemData.bits+ModemData.stopbits))+1;
       unsigned long t, startTime = millis();
           
       if( millisPerChar<5 ) millisPerChar = 5;
@@ -1175,7 +1229,7 @@ void relayTelnetData()
               
           // if Telnet protocol handling is enabled then we need to duplicate IAC tokens
           // if they occur in the general data stream
-          if( b==T_IAC && SerialData.handleTelnetProtocol ) buf[n++] = b;
+          if( b==T_IAC && ModemData.handleTelnetProtocol ) buf[n++] = b;
 
           if( modemEscapeState>=1 && modemEscapeState<=3 && b==modemReg[REG_ESC] )
             modemEscapeState++;
@@ -1189,7 +1243,7 @@ void relayTelnetData()
         }
 
       // push UART data to all connected telnet clients
-      if( !SerialData.handleTelnetProtocol || clientTelnetState.sendBinary )
+      if( !ModemData.handleTelnetProtocol || clientTelnetState.sendBinary )
         telnetClient.write(buf, n);
       else
         {
@@ -1209,6 +1263,17 @@ void relayTelnetData()
 
 void loop() 
 {
+  if( millis()-lastConnectCheck >= 5000 )
+    {
+      if( WiFi.status() != WL_CONNECTED && WiFi.SSID() != "" )
+        {
+          digitalWrite(LED_PIN, LOW);
+          delay(250);
+          digitalWrite(LED_PIN, HIGH);
+       }
+      lastConnectCheck = millis();
+    }
+
   if( modemClient && modemClient.connected() )
     {
       // modem is connected. if telnet server has new client then reject
