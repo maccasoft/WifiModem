@@ -35,7 +35,8 @@ bool    modemCommandMode = true, modemEcho = true, modemQuiet = false, modemVerb
 static int linespeeds[] = {0, 75, 110, 300, 600, 1200, 2400, 4800, 7200, 9600, 12000, 14400};
 #define NSPEEDS (sizeof(linespeeds)/sizeof(int))
 
-#define LED_PIN 2
+#define LED_PIN            2
+#define DCD_PIN            2
 
 #define REG_ESC            2
 #define REG_CR             3
@@ -172,6 +173,8 @@ void setup()
 {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
+  pinMode(DCD_PIN, OUTPUT);
+  digitalWrite(DCD_PIN, HIGH);
 
   // read serial info
   EEPROM.begin(1024);
@@ -252,8 +255,16 @@ void resetModemState()
   modemQuiet = false;
   modemVerbose = true;
   
-  if( modemClient.connected() ) modemClient.stop();
-  if( telnetClient.connected() ) telnetClient.stop();
+  if( modemClient.connected() )
+    {
+      modemClient.stop();
+      digitalWrite(DCD_PIN, HIGH);
+    }
+  if( telnetClient.connected() )
+    {
+      telnetClient.stop();
+      digitalWrite(DCD_PIN, HIGH);
+    }
 }
 
 
@@ -651,6 +662,7 @@ void handleModemCommand()
                     {
                       modemClient.stop();
                       modemReg[REG_CURLINESPEED] = 0;
+                      digitalWrite(DCD_PIN, HIGH);
                     }
 
                   ptr++;
@@ -743,6 +755,7 @@ void handleModemCommand()
 
                           status = getConnectStatus();
                           connecting = true;
+                          digitalWrite(DCD_PIN, LOW);
                         }
                       else if( modemExtCodes==0 )
                         status = E_NOCARRIER;
@@ -768,6 +781,7 @@ void handleModemCommand()
                     {
                       telnetClient = server.available();
                       status = getConnectStatus();
+                      digitalWrite(DCD_PIN, LOW);
                   
                       resetTelnetState(clientTelnetState);
                       modemCommandMode = false;
@@ -785,9 +799,15 @@ void handleModemCommand()
                     {
                       // hang up
                       if( modemClient && modemClient.connected() ) 
+                        {
                           modemClient.stop();
+                          digitalWrite(DCD_PIN, HIGH);
+                        }
                       if( telnetClient && telnetClient.connected() ) 
+                        {
                           telnetClient.stop();
+                          digitalWrite(DCD_PIN, HIGH);
+                        }
                       modemReg[REG_CURLINESPEED] = 0;
                     }
 
@@ -1308,6 +1328,8 @@ void loop()
           if( telnetClient ) telnetClient.stop();
           if( modemClient ) modemClient.stop();
 
+          digitalWrite(DCD_PIN, HIGH);
+
           modemCommandMode = true;
           modemReg[REG_CURLINESPEED] = 0;
           printModemResult(E_NOCARRIER);
@@ -1341,6 +1363,7 @@ void loop()
               telnetClient = server.available();
               int i = getConnectStatus();
               printModemResult(i);
+              digitalWrite(DCD_PIN, LOW);
           
               resetTelnetState(clientTelnetState);
               modemEscapeState=0;
