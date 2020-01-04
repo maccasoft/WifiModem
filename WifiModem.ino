@@ -653,7 +653,17 @@ void handleModemCommand()
                       modemReg[REG_CURLINESPEED] = 0;
                     }
 
-                  ptr++; if( toupper(cmd[ptr])=='T' || toupper(cmd[ptr])=='P' ) ptr++;
+                  ptr++;
+                  if( toupper(cmd[ptr])=='T' )
+                    {
+                      ModemData.handleTelnetProtocol = 1;
+                      ptr++;
+                    }
+                  else if( toupper(cmd[ptr])=='P' )
+                    {
+                      ModemData.handleTelnetProtocol = 0;
+                      ptr++;
+                    }
 
                   bool haveAlpha = false;
                   int numSep = 0;
