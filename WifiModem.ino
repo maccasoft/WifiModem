@@ -19,12 +19,18 @@
 // -----------------------------------------------------------------------------
 
 #include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
 #include <EEPROM.h>
 
 
 WiFiServer server(23);
 WiFiClient modemClient;
 WiFiClient telnetClient;
+
+WiFiUDP   udp;
+int       udpPort;
+IPAddress udpAddr;
+char      packetBuffer[UDP_TX_PACKET_MAX_SIZE];
 
 unsigned long lastConnectCheck = 0;
 unsigned long prevCharTime = 0;
@@ -645,6 +651,15 @@ void handleModemCommand()
       
   if( c == modemReg[REG_CR] )
     {
+      while( (millis()-prevCharTime)<100 )
+        {
+          if( Serial.available() )
+            {
+              Serial.read();
+              break;
+            }
+        }
+
       prevCmdLen = cmdLen;
       if( cmdLen>=2 && toupper(cmd[0])=='A' && toupper(cmd[1])=='T' )
         {
@@ -995,8 +1010,8 @@ void handleModemCommand()
                     }
                   else
                     {
-                    status = E_ERROR;
-                    ptr = cmdLen;
+                      status = E_ERROR;
+                      ptr = cmdLen;
                     }
                 }
               else if( cmd[ptr]=='+' )
@@ -1106,6 +1121,86 @@ void handleModemCommand()
                         }
                       else
                         status = E_ERROR;
+                    }
+                  else if( strncmpi(cmd+ptr, "CIPMUX", 6)==0 )
+                    {
+                      ptr += 6;
+                      if( getCmdParam(cmd, ptr) == 0 )
+                        {
+                          printModemResult(E_OK);
+                          status = -1;
+                        }
+                      else
+                        status = E_ERROR;
+                    }
+                  else if( strncmpi(cmd+ptr, "CIPSTART", 8)==0 )
+                    {
+                      char type[32];
+                      char host[64];
+
+                      ptr += 8;
+                      status = E_ERROR;
+
+                      getCmdParam(cmd, type, ptr);
+                      if( strncmpi(type, "UDP", 3)==0 && cmd[ptr]==',' )
+                        {
+                          getCmdParam(cmd, host, ptr);
+                          if( cmd[ptr]==',' )
+                            {
+                              udpPort = getCmdParam(cmd, ptr);
+
+                              status = -1;
+                              if ( !WiFi.hostByName(host, udpAddr) )
+                                {
+                                  if ( !udpAddr.fromString(host) )
+                                    status = E_ERROR;
+                                }
+
+                              if ( status==-1 )
+                                {
+                                  udp.stop();
+                                  udp.begin(udpPort);
+                                  printModemResult(E_OK);
+                                }
+                            }
+                        }
+                    }
+                  else if( strncmpi(cmd+ptr, "CIPSEND", 7)==0 )
+                    {
+                      ptr += 7;
+                      int len = getCmdParam(cmd, ptr);
+                      if ( len!=0 )
+                        {
+                          printModemResult(E_OK);
+                          status = E_ERROR;
+
+                          Serial.print("> ");
+
+                          int i = 0;
+                          while ( i<len && i<UDP_TX_PACKET_MAX_SIZE )
+                            {
+                              if( Serial.available() )
+                                packetBuffer[i++] = Serial.read();
+                            }
+
+                          if ( udp.beginPacket(udpAddr, udpPort) )
+                            {
+                              udp.write(packetBuffer, i);
+                              if ( udp.endPacket() )
+                                {
+                                  printModemResult(E_OK);
+                                  status = -1;
+                                }
+                            }
+                        }
+                      else
+                        status = E_ERROR;
+                    }
+                  else if( strncmpi(cmd+ptr, "CIPCLOSE", 8)==0 )
+                    {
+                      udp.stop();
+                      printModemResult(E_OK);
+                      status = -1;
                     }
                   else
                     status = E_ERROR;
@@ -1291,7 +1386,6 @@ void relayTelnetData()
     }
 }
 
-
 void loop() 
 {
   if( millis()-lastConnectCheck >= 5000 )
@@ -1379,5 +1473,17 @@ void loop()
     }
 
   if( modemCommandMode )
-    handleModemCommand();
+    {
+      int packetSize = udp.parsePacket();
+      if (packetSize)
+        {
+          int n = udp.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
+          Serial.print("+IPD,");
+          Serial.print(n);
+          Serial.print(":");
+          Serial.write(packetBuffer, n);
+          printModemCR();
+       }
+      handleModemCommand();
+    }
 }
