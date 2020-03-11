@@ -201,7 +201,7 @@ void setup()
       EEPROM.put(0, ModemData);
       EEPROM.commit();
     }
-  
+
   // start serial interface
   Serial.begin(ModemData.baud);
 
@@ -261,7 +261,7 @@ void resetModemState()
   modemEcho = true;
   modemQuiet = false;
   modemVerbose = true;
-  
+
   if( modemClient.connected() )
     {
       modemClient.stop();
@@ -332,7 +332,7 @@ long getCmdParam(char *cmd, int &ptr)
       res = (res * 10) + (cmd[ptr] - '0');
       ptr++;
     }
-  
+
   return res;
 }
 
@@ -415,9 +415,9 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
       state.receivedCR = true;
       return false;
     }
-  
+
   // ---- handle IAC sequences
-  
+
   if( state.cmdLen==0 )
     {
       // waiting for IAC byte
@@ -571,7 +571,7 @@ int strncmpi(const char *s1, const char *s2, size_t cchars)
     s2++;
     cchars--;
   } while ( (c1 != 0) && (c1 == c2) && (cchars>0) );
-  
+
   return (int)(c1 - c2);
 }
 
@@ -579,7 +579,7 @@ int strncmpi(const char *s1, const char *s2, size_t cchars)
 int getConnectStatus()
 {
   int res;
-  
+
   if( modemReg[REG_LINESPEED]==0 )
     {
       int i = 0;
@@ -615,7 +615,6 @@ int getConnectStatus()
     return res;
 }
 
-
 void handleModemCommand()
 {
   // check if a modem AT command was received
@@ -625,12 +624,12 @@ void handleModemCommand()
 
   if( Serial.available() )
     {
-      c = (Serial.read() & 0x7f);
+      c = Serial.read() & 0x7f;
       if( cmdLen<80 && c>32 )
         cmd[cmdLen++] = c;
       else if( cmdLen>0 && c == modemReg[REG_BSP] )
         cmdLen--;
-          
+
       if( modemEcho ) 
         {
           if( c == modemReg[REG_BSP] )
@@ -638,7 +637,7 @@ void handleModemCommand()
           else
             Serial.print(c);
         }
-          
+
       prevCharTime = millis();
     }
 
@@ -648,7 +647,7 @@ void handleModemCommand()
       cmd[1] = 'T';
       cmdLen = prevCmdLen;
     }
-      
+
   if( c == modemReg[REG_CR] )
     {
       while( (millis()-prevCharTime)<100 )
@@ -734,7 +733,7 @@ void handleModemCommand()
                               n[j/3] = atoi(cmd+ptr+j);
                               cmd[ptr+j+3] = c;
                             }
-                              
+
                           addr = IPAddress(n);
                           if( cmdLen-ptr==16 ) port = atoi(cmd+ptr+12);
                         }
@@ -784,7 +783,7 @@ void handleModemCommand()
                       // the dial command and responding to it
                       if( millis()-t<1000 ) delay(1000-(millis()-t));
                     }
-                      
+
                   // ATD can not be followed by other commands
                   ptr = cmdLen;
                 }
@@ -792,13 +791,13 @@ void handleModemCommand()
                 {
                   // force at least 1 second before responding
                   delay(1000);
-    
+
                   if( server.hasClient() ) 
                     {
                       telnetClient = server.available();
                       status = getConnectStatus();
                       digitalWrite(DCD_PIN, LOW);
-                  
+
                       resetTelnetState(clientTelnetState);
                       modemCommandMode = false;
                       modemEscapeState=0;
@@ -975,7 +974,7 @@ void handleModemCommand()
                   else
                     status = E_ERROR;
                 }
-              else if( toupper(cmd[ptr])=='M' || toupper(cmd[ptr])=='L' || toupper(cmd[ptr])=='A' || toupper(cmd[ptr])=='P' || toupper(cmd[ptr])=='T' )
+              else if( toupper(cmd[ptr])=='M' || toupper(cmd[ptr])=='L' || toupper(cmd[ptr])=='P' || toupper(cmd[ptr])=='T' )
                 {
                   // ignore speaker settings, answer requests, pulse/tone dial settings
                   getCmdParam(cmd, ptr);
@@ -998,13 +997,13 @@ void handleModemCommand()
                       ModemData.silent   = false;
                       ModemData.handleTelnetProtocol = 1;
                       strcpy(ModemData.telnetTerminalType, "vt100");
-                      
+
                       applySerialSettings();
-    
+
                       // reset parameters (ignore command parameter)
                       getCmdParam(cmd, ptr);
                       resetModemState();
-    
+
                       // can not be followed by other commands
                       ptr = cmdLen;
                     }
@@ -1218,7 +1217,7 @@ void handleModemCommand()
         }
       else if( cmdLen>0 )
         printModemResult(E_ERROR);
-              
+
       cmdLen = 0;
     }
 }
@@ -1274,7 +1273,7 @@ void relayModemData()
       uint8_t buf[256];
       int n = 0, millisPerChar = 1000 / (ModemData.baud / (1+ModemData.bits+ModemData.stopbits)) + 1;
       unsigned long startTime = millis();
-              
+
       if( millisPerChar<5 ) millisPerChar = 5;
       while( Serial.available() && n<256 && millis()-startTime < 100 )
         {
@@ -1293,7 +1292,7 @@ void relayModemData()
 
           buf[n++] = b;
           prevCharTime = millis();
-                  
+
           if( modemEscapeState>=1 && modemEscapeState<=3 && b==modemReg[REG_ESC] )
             modemEscapeState++;
           else
@@ -1304,7 +1303,7 @@ void relayModemData()
           // some BBSs don't recognize the sequence if there is too much delay
           while( !Serial.available() && millis()-prevCharTime < millisPerChar );
         }
-              
+
       // if not sending in binary mode then a stand-alone CR (without LF) must be followd by NUL
       if( ModemData.handleTelnetProtocol && !modemTelnetState.sendBinary && buf[n-1] == 0x0d && !Serial.available() ) buf[n++] = 0;
 
@@ -1338,21 +1337,21 @@ void relayTelnetData()
           printModemResult(E_OK);
         }
     }
-          
+
   //check UART for data
   if( Serial.available() )
     {
       uint8_t buf[256];
       int n = 0, millisPerChar = 1000 / (ModemData.baud / (1+ModemData.bits+ModemData.stopbits))+1;
       unsigned long t, startTime = millis();
-          
+
       if( millisPerChar<5 ) millisPerChar = 5;
       while( Serial.available() && n<256 && millis()-startTime < 100 )
         {
           uint8_t b = Serial.read();
           buf[n++] = b;
           prevCharTime = millis();
-              
+
           // if Telnet protocol handling is enabled then we need to duplicate IAC tokens
           // if they occur in the general data stream
           if( b==T_IAC && ModemData.handleTelnetProtocol ) buf[n++] = b;
@@ -1361,7 +1360,7 @@ void relayTelnetData()
             modemEscapeState++;
           else
             modemEscapeState=0;
-              
+
           // wait a short time to see if another character is coming in so we
           // can send multi-character (escape) sequences in the same packet
           t = millis();
@@ -1459,7 +1458,7 @@ void loop()
               int i = getConnectStatus();
               printModemResult(i);
               digitalWrite(DCD_PIN, LOW);
-          
+
               resetTelnetState(clientTelnetState);
               modemEscapeState=0;
               modemCommandMode = false;
