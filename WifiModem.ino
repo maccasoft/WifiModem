@@ -50,6 +50,7 @@ static int linespeeds[] = {0, 75, 110, 300, 600, 1200, 2400, 4800, 7200, 9600, 1
 #define REG_LF             4
 #define REG_BSP            5
 #define REG_GUARDTIME     12
+#define REG_TELNET        15
 #define REG_LINESPEED     37
 #define REG_CURLINESPEED  43
 
@@ -97,7 +98,7 @@ struct ModemDataStruct
   byte     parity;
   byte     stopbits;
   byte     silent;
-  byte     handleTelnetProtocol;
+  byte     unused;
   char     telnetTerminalType[32];
 
   uint8_t  reg[256];
@@ -196,7 +197,6 @@ void setup()
       ModemData.parity   = 0;
       ModemData.stopbits = 1;
       ModemData.silent   = false;
-      ModemData.handleTelnetProtocol = 1;
       strcpy(ModemData.telnetTerminalType, "vt100");
       EEPROM.put(0, ModemData);
       EEPROM.commit();
@@ -376,13 +376,13 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
 #define TO_TERMINAL_TYPE      24
 
   // if not handling telnet protocol then just return
-  if( !ModemData.handleTelnetProtocol ) return false;
+  if( !modemReg[REG_TELNET] ) return false;
 
   // ---- handle incoming sub-negotiation sequences
 
   if( state.subnegotiation )
     {
-      if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+      if( modemReg[REG_TELNET]>1 ) {Serial.print('<'); Serial.print(b, HEX);}
 
       if( state.cmdLen==0 && b == T_IAC )
         state.cmdLen = 1; 
@@ -405,7 +405,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
       if( b==0 )
         {
           // CR->NUL => CR (i.e. ignore the NUL)
-          if( ModemData.handleTelnetProtocol>1 ) Serial.print("<0d<00");
+          if( modemReg[REG_TELNET]>1 ) Serial.print("<0d<00");
           return true;
         }
     }
@@ -425,13 +425,13 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
         {
           state.cmdLen = 1;
           state.cmd[0] = T_IAC;
-          if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+          if( modemReg[REG_TELNET]>1 ) {Serial.print('<'); Serial.print(b, HEX);}
           return true;
         }
     }
   else if( state.cmdLen==1 )
     {
-      if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+      if( modemReg[REG_TELNET]>1 ) {Serial.print('<'); Serial.print(b, HEX);}
       // received second byte of IAC sequence
       if( b == T_IAC )
         {
@@ -465,7 +465,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
   else if( state.cmdLen==2 )
     {
       // received third (i.e. last) byte of IAC sequence
-      if( ModemData.handleTelnetProtocol>1 ) {Serial.print('<'); Serial.print(b, HEX);}
+      if( modemReg[REG_TELNET]>1 ) {Serial.print('<'); Serial.print(b, HEX);}
       state.cmd[2] = b;
 
       bool reply = true;
@@ -511,7 +511,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
       // send reply if necessary
       if( reply ) 
         {
-          if( ModemData.handleTelnetProtocol>1 )
+          if( modemReg[REG_TELNET]>1 )
             for(int k=0; k<3; k++) {Serial.print('>'); Serial.print(state.cmd[k], HEX);}
 
           client.write(state.cmd, 3);
@@ -529,7 +529,7 @@ bool handleTelnetProtocol(uint8_t b, WiFiClient &client, struct TelnetStateStruc
               buf[n++] = T_IAC;
               buf[n++] = T_SE;
               client.write(buf, n);
-              if( ModemData.handleTelnetProtocol>1 )
+              if( modemReg[REG_TELNET]>1 )
                 for(int k=0; k<n; k++) {Serial.print('>'); Serial.print(buf[k], HEX);}
             }
         }
@@ -681,14 +681,8 @@ void handleModemCommand()
                     }
 
                   ptr++;
-                  if( toupper(cmd[ptr])=='T' )
+                  if( toupper(cmd[ptr])=='T' || toupper(cmd[ptr])=='P' )
                     {
-                      ModemData.handleTelnetProtocol = 1;
-                      ptr++;
-                    }
-                  else if( toupper(cmd[ptr])=='P' )
-                    {
-                      ModemData.handleTelnetProtocol = 0;
                       ptr++;
                     }
 
@@ -887,7 +881,9 @@ void handleModemCommand()
                     {
                       byte v = getCmdParam(cmd, ptr);
                       if( reg != REG_CURLINESPEED )
-                        modemReg[reg] = v;
+                        {
+                          modemReg[reg] = v;
+                        }
                     }
                 }
               else if( toupper(cmd[ptr])=='I' )
@@ -950,6 +946,11 @@ void handleModemCommand()
                           Serial.print("S5=");
                           Serial.print(modemReg[REG_BSP]);
                         }
+                      if( modemReg[REG_TELNET] != 0 || showAll )
+                        {
+                          Serial.print("S15=");
+                          Serial.print(modemReg[REG_TELNET]);
+                        }
                     }
                   else if( n == 2 )
                     {
@@ -995,7 +996,6 @@ void handleModemCommand()
                       ModemData.parity   = 0;
                       ModemData.stopbits = 1;
                       ModemData.silent   = false;
-                      ModemData.handleTelnetProtocol = 1;
                       strcpy(ModemData.telnetTerminalType, "vt100");
 
                       applySerialSettings();
@@ -1279,7 +1279,7 @@ void relayModemData()
         {
           uint8_t b = Serial.read();
 
-          if( ModemData.handleTelnetProtocol )
+          if( modemReg[REG_TELNET] )
             {
               // Telnet protocol handling is enabled
 
@@ -1305,7 +1305,7 @@ void relayModemData()
         }
 
       // if not sending in binary mode then a stand-alone CR (without LF) must be followd by NUL
-      if( ModemData.handleTelnetProtocol && !modemTelnetState.sendBinary && buf[n-1] == 0x0d && !Serial.available() ) buf[n++] = 0;
+      if( modemReg[REG_TELNET] && !modemTelnetState.sendBinary && buf[n-1] == 0x0d && !Serial.available() ) buf[n++] = 0;
 
       modemClient.write(buf, n);
     }
@@ -1354,7 +1354,7 @@ void relayTelnetData()
 
           // if Telnet protocol handling is enabled then we need to duplicate IAC tokens
           // if they occur in the general data stream
-          if( b==T_IAC && ModemData.handleTelnetProtocol ) buf[n++] = b;
+          if( b==T_IAC && modemReg[REG_TELNET] ) buf[n++] = b;
 
           if( modemEscapeState>=1 && modemEscapeState<=3 && b==modemReg[REG_ESC] )
             modemEscapeState++;
@@ -1368,7 +1368,7 @@ void relayTelnetData()
         }
 
       // push UART data to all connected telnet clients
-      if( !ModemData.handleTelnetProtocol || clientTelnetState.sendBinary )
+      if( !modemReg[REG_TELNET] || clientTelnetState.sendBinary )
         telnetClient.write(buf, n);
       else
         {

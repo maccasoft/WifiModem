@@ -7,7 +7,7 @@ This is a firmware for the ESP8266 module that emulates an Hayes-compatible mode
 | Command | Description |
 | ------- | ----------- |
 | **A**  | Answer incoming call |
-| **D**  | Connect (dial) to the following host/ip<br><br>**P** - Raw connection<br>**T** - Telnet emulation<br><br>Examples:<br><br>ATDP n.n.n.n[:port]. Connect to IP addres n.n.n.n.<br>ATDT hostname.com[:port]. Connect to hostname.com using telnet protocol.<br><br>If not specified, the default port number is 23.|
+| **D**  | Connect (dial) to the following host/ip<br><br>Examples:<br><br>ATDP n.n.n.n[:port]. Connect to IP addres n.n.n.n.<br>ATDT hostname.com[:port]. Connect to hostname.com.<br><br>If not specified, the default port number is 23.|
 | **E0** | Will not echo commands to the computer |
 | **E1** | Will echo commands to the computer (so one can see what one types if the computer software does not support echo) |
 | **H**  | On hook. Hangs up the phone, ending any call in progress. |
@@ -57,6 +57,7 @@ The firmware allows to set and store all registers from 0 to 255, however only a
 | **S4**  | Line Feed character | 0-255, ASCII decimal | 10 (Line Feed) |
 | **S5**  | Backspace character | 0-255, ASCII decimal | 8 (Backspace) |
 | **S12**  | Escape Code Guard Time | 0–255 fiftieths of a second | 50 (1 second) |
+| **S15**  | Telnet Protocol | 0=Disable, 1=Enable | 0 |
 | **S37**  | Desired telco line speed. | 0-11 | 0 |
 
 By default the module will send and receive its information as fast as the serial connection baud rate allows.
